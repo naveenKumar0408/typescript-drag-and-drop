@@ -1,3 +1,14 @@
+// Drag and Drop Interfaces
+interface Draggable {
+  dragStartHandler(event: DragEvent): void;
+  dragEndHandler(event: DragEvent): void;
+}
+interface DragTarget {
+  dragOverHandler(event: DragEvent): void;
+  dropHandler(event: DragEvent): void;
+  dragLeaveHandler(event: DragEvent): void;
+}
+
 enum ProjectStatus {
   Active,
   Finished,
@@ -43,6 +54,16 @@ class ProjectState extends State<Project> {
       ProjectStatus.Active
     );
     this.projects.push(newProject);
+    this.updateListeners();
+  }
+  moveProject(projectId: string, newStatus: ProjectStatus) {
+    const project = this.projects.find((proj) => proj.id == projectId);
+    if (project && project.status !== newStatus) {
+      project.status = newStatus;
+      this.updateListeners();
+    }
+  }
+  private updateListeners() {
     for (const listenerFn of this.listeners) {
       listenerFn(this.projects.slice());
     }
@@ -146,25 +167,46 @@ abstract class Component<T extends HTMLElement, U extends HTMLElement> {
 }
 
 // Project Item Class
-class ProjectItem extends Component<HTMLUListElement, HTMLLIElement> {
+class ProjectItem
+  extends Component<HTMLUListElement, HTMLLIElement>
+  implements Draggable
+{
   private Project: Project;
+  get persons() {
+    if (this.Project.people === 1) {
+      return "1 person";
+    } else {
+      return `${this.Project.people} persons`;
+    }
+  }
   constructor(hostId: string, project: Project) {
     super("single-project", hostId, false, project.id);
     this.Project = project;
     this.configure();
     this.renderContent();
   }
-  configure(): void {}
+  @autobind
+  dragStartHandler(event: DragEvent) {
+    event.dataTransfer!.setData("text/plain", this.Project.id);
+    event.dataTransfer!.effectAllowed = "move";
+  }
+  dragEndHandler(event: DragEvent) {}
+  configure(): void {
+    this.element.addEventListener("dragstart", this.dragStartHandler);
+    this.element.addEventListener("dragend", this.dragEndHandler);
+  }
   renderContent(): void {
     this.element.querySelector("h2")!.textContent = this.Project.title;
     this.element.querySelector("p")!.textContent = this.Project.description;
-    this.element.querySelector("h3")!.textContent =
-      this.Project.people.toString();
+    this.element.querySelector("h3")!.textContent = this.persons + " assigned";
   }
 }
 
 //  Project List Class
-class ProjectList extends Component<HTMLDivElement, HTMLElement> {
+class ProjectList
+  extends Component<HTMLDivElement, HTMLElement>
+  implements DragTarget
+{
   assignedProjects: Project[];
   constructor(private type: "active" | "finished") {
     super("project-list", "app", false, `${type}-projects`);
@@ -172,6 +214,27 @@ class ProjectList extends Component<HTMLDivElement, HTMLElement> {
     this.configure();
     this.renderContent();
   }
+  @autobind
+  dragOverHandler(event: DragEvent): void {
+    if (event.dataTransfer && event.dataTransfer.types[0] === "text/plain") {
+      event.preventDefault();
+      const listEl = this.element.querySelector("ul")!;
+      listEl.classList.add("droppable");
+    }
+  }
+  @autobind
+  dropHandler(event: DragEvent): void {
+    const projectId = event.dataTransfer!.getData("text/plain");
+    projectState.moveProject(
+      projectId,
+      this.type === "active" ? ProjectStatus.Active : ProjectStatus.Finished
+    );
+  }
+  dragLeaveHandler(event: DragEvent): void {
+    const listEl = this.element.querySelector("ul")!;
+    listEl.classList.remove("droppable");
+  }
+
   private renderProjects() {
     const listElement = document.getElementById(
       `${this.type}-projects-list`
@@ -182,6 +245,9 @@ class ProjectList extends Component<HTMLDivElement, HTMLElement> {
     }
   }
   configure(): void {
+    this.element.addEventListener("dragover", this.dragOverHandler);
+    this.element.addEventListener("dragleave", this.dragLeaveHandler);
+    this.element.addEventListener("drop", this.dropHandler);
     projectState.addListener((projects: Project[]) => {
       const relevantProjects = projects.filter((project) => {
         if (this.type === "active") {
